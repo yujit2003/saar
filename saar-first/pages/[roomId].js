@@ -13,6 +13,14 @@ import CopySection from "@/component/CopySection";
 import styles from "@/styles/room.module.css";
 import { useRouter } from "next/router";
 
+// const TranscriptionDisplay = ({ transcriptions }) => (
+//   <div>
+//     {Object.entries(transcriptions).map(([userId, transcription]) => (
+//       <p key={userId}><strong>User ID:</strong> {userId} - <strong>Transcription:</strong> {transcription}</p>
+//     ))}
+//   </div>
+// );
+
 const Room = () => {
   const socket = useSocket();
   const { roomId } = useRouter().query;
@@ -28,7 +36,8 @@ const Room = () => {
     leaveRoom
   } = usePlayer(myId, roomId, peer);
 
-  const [users, setUsers] = useState([])
+  const [users, setUsers] = useState([]);
+  const [transcriptions, setTranscriptions] = useState({});
 
   useEffect(() => {
     if (!socket || !peer || !stream) return;
@@ -62,41 +71,17 @@ const Room = () => {
   }, [peer, setPlayers, socket, stream]);
 
   useEffect(() => {
-    if (!socket) return;
-    const handleToggleAudio = (userId) => {
-      console.log(`user with id ${userId} toggled audio`);
-      setPlayers((prev) => {
-        const copy = cloneDeep(prev);
-        copy[userId].muted = !copy[userId].muted;
-        return { ...copy };
-      });
-    };
-
-    const handleToggleVideo = (userId) => {
-      console.log(`user with id ${userId} toggled video`);
-      setPlayers((prev) => {
-        const copy = cloneDeep(prev);
-        copy[userId].playing = !copy[userId].playing;
-        return { ...copy };
-      });
-    };
-
-    const handleUserLeave = (userId) => {
-      console.log(`user ${userId} is leaving the room`);
-      users[userId]?.close()
-      const playersCopy = cloneDeep(players);
-      delete playersCopy[userId];
-      setPlayers(playersCopy);
-    }
-    socket.on("user-toggle-audio", handleToggleAudio);
-    socket.on("user-toggle-video", handleToggleVideo);
-    socket.on("user-leave", handleUserLeave);
-    return () => {
-      socket.off("user-toggle-audio", handleToggleAudio);
-      socket.off("user-toggle-video", handleToggleVideo);
-      socket.off("user-leave", handleUserLeave);
-    };
-  }, [players, setPlayers, socket, users]);
+    if (!stream || !myId) return;
+    console.log(`setting my stream ${myId}`);
+    setPlayers((prev) => ({
+      ...prev,
+      [myId]: {
+        url: stream,
+        muted: true,
+        playing: true,
+      },
+    }));
+  }, [myId, setPlayers, stream]);
 
   useEffect(() => {
     if (!peer || !stream) return;
@@ -124,21 +109,44 @@ const Room = () => {
   }, [peer, setPlayers, stream]);
 
   useEffect(() => {
-    if (!stream || !myId) return;
-    console.log(`setting my stream ${myId}`);
-    setPlayers((prev) => ({
-      ...prev,
-      [myId]: {
-        url: stream,
-        muted: true,
-        playing: true,
-      },
-    }));
-  }, [myId, setPlayers, stream]);
+    if (!stream) return;
+  
+    // Check if SpeechRecognition API is available
+    if ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) {
+      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = "en-US";
+      
+      recognition.onresult = (event) => {
+        const transcription = event.results[0][0].transcript;
+        console.log('Transcription:', transcription);
+        setTranscriptions((prev) => ({
+          ...prev,
+          [myId]: transcription
+        }));
+        // Handle the transcription here
+      };
+      
+      recognition.onerror = (event) => {
+        console.error('Recognition error:', event.error);
+        // Handle recognition errors here
+      };
+  
+      recognition.onend = () => {
+        // console.log('Recognition ended. Restarting...');
+        // Restart recognition for continuous transcription
+        recognition.start();
+      };
+  
+      recognition.start();
+    } else {
+      console.error("SpeechRecognition API is not supported in this browser");
+    }
+  }, [stream]);
 
   return (
     <>
       <div className={styles.activePlayerContainer}>
+        
         {playerHighlighted && (
           <Player
             url={playerHighlighted.url}
@@ -170,6 +178,7 @@ const Room = () => {
         toggleVideo={toggleVideo}
         leaveRoom={leaveRoom}
       />
+      {/* {Object.keys(transcriptions).length > 0 && <TranscriptionDisplay transcriptions={transcriptions} />} */}
     </>
   );
 };
